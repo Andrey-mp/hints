@@ -1,0 +1,86 @@
+# (contrail-controller-config-api:ocata-5.0.0-50)
+image=`docker images | awk '/config-api/{print $3}'`
+docker run -it --rm --entrypoint /bin/bash --network host -v /root/.ssh:/root/.ssh $image
+
+yum-config-manager --disable contrail
+
+yum install -y git
+git clone https://github.com/Juniper/contrail-controller
+cd contrail-controller
+git fetch https://review.opencontrail.org/Juniper/contrail-controller refs/changes/39/42539/1 && git checkout FETCH_HEAD
+export TERM=xterm
+
+cat <<EOF > /etc/contrail/contrail-issu.conf
+[DEFAULTS]
+old_rabbit_user = contrail
+old_rabbit_password = ab86245f4f3640a29b700def9e194f72
+old_rabbit_q_name = vnc-config.issu-queue
+old_rabbit_vhost = contrail
+old_rabbit_port = 5672
+new_rabbit_user = rabbitmq
+new_rabbit_password = password
+#new_rabbit_ha_mode =
+new_rabbit_q_name = vnc-config.issu-queue
+new_rabbit_vhost = /
+new_rabbit_port = 5672
+old_cassandra_user = controller
+old_cassandra_password = 04dc0540b796492fad6f7cbdcfb18762
+old_cassandra_address_list = 10.0.10.20:9161
+old_zookeeper_address_list = 10.0.10.20:2181
+old_rabbit_address_list = 10.0.10.20
+new_cassandra_address_list = 10.3.87.166:9161 10.3.87.167:9161 10.3.87.168:9161
+new_zookeeper_address_list = 10.3.87.166:2181
+new_rabbit_address_list = rabbitmq.openstack
+new_api_info = {"10.3.87.166": [("root"), ("")], "10.3.87.167": [("root"), ("")], "10.3.87.168": [("root"), ("")]}
+EOF
+
+cd src/config/contrail_issu
+python setup.py install
+/usr/bin/contrail-issu-pre-sync -c /etc/contrail/contrail-issu.conf
+/usr/bin/contrail-issu-run-sync -c /etc/contrail/contrail-issu.conf
+
+
+
+
+# virsh: remove iptables fucking rules
+iptables -S FORWARD | awk '/icmp/{print "iptables -D ",$2,$3,$4,$5,$6,$7,$8}' >1
+bash 1
+# remove machine from Juju
+juu remove-unit nova-compute/1
+
+# ssh into this machine:
+ssh root@10.0.10.31
+# remove packages
+apt-get purge contrail* nova*
+apt-get autoremove
+# restore interfaces
+cd /etc/network/interfaces.d/
+cp 50-cloud-init.cfg.save 50-cloud-init.cfg
+rm vrouter.cfg
+# reboot & wait
+reboot
+
+# ssh into this machine and prepare it to helm:
+ssh root@10.0.10.31
+sudo mkdir -p /opt
+for repo in 'openstack-helm' 'openstack-helm-infra' 'contrail-helm-deployer' ; do git clone https://github.com/Juniper/${repo}.git /opt/$repo ; done
+
+
+
+# on master node (deployment was initiated from that node)
+export BASE_DIR=/opt
+mkdir -p $BASE_DIR
+export OSH_PATH=${BASE_DIR}/openstack-helm
+export OSH_INFRA_PATH=${BASE_DIR}/openstack-helm-infra
+export CHD_PATH=${BASE_DIR}/contrail-helm-deployer
+cd ${OSH_INFRA_PATH}
+# change tools/gate/devel/multinode-inventory.yaml
+cp tools/gate/devel/multinode-inventory.yaml tools/gate/devel/multinode-inventory.yaml.save
+mcedit tools/gate/devel/multinode-inventory.yaml
+make dev-deploy setup-host multinode
+make dev-deploy k8s multinode
+
+name=jc-comp-2
+kubectl label node $name --overwrite openstack-control-plane=disable
+kubectl label node $name opencontrail.org/vrouter-kernel=enabled
+

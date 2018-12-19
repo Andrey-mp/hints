@@ -1,0 +1,8 @@
+
+for name in `docker images|grep contrail|awk '{print $1}'|cut -d '/' -f 2`; do \
+  id=`docker images|grep "$name "|sort|tail -1|awk '{print $3}'` ; \
+  tag=`docker images|grep "$name "|sort|tail -1|awk '{print $2}'` ; \
+  echo "Saving $name   $tag" ; \
+  docker save $id | gzip -c > "$name-$tag.tgz" ; \
+done
+

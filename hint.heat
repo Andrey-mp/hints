@@ -1,0 +1,20 @@
+source /etc/kolla/admin-openrc.sh
+sudo pip install python-heatclient
+
+export OS_CLOUD=openstack_helm
+
+openstack orchestration resource type list | grep -i contrail
+
+
+git clone https://github.com/juniper/contrail-heat
+openstack stack create --wait -t contrail-heat/contrail_heat/new_templates/virtual_network_with_subnet.yaml -e contrail-heat/contrail_heat/new_envs/virtual_network_with_subnet.env ttr
+
+wget http://download.cirros-cloud.net/0.3.5/cirros-0.3.5-x86_64-disk.img
+openstack image create --public --file cirros-0.3.5-x86_64-disk.img cirros
+openstack image create --public --file cirros-0.3.5-x86_64-disk.img vsrx
+openstack stack create --wait -t contrail-heat/contrail_heat/new_templates/svc_port_tuple.yaml -e contrail-heat/contrail_heat/new_envs/svc_port_tuple.env ttt
+
+openstack stack failures list ttt
+openstack stack resource list ttt
+openstack stack resource show ttt template_NetworkIpam_3
+

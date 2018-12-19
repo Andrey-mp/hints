@@ -1,0 +1,11 @@
+sysctl -w net.ipv4.ip_forward=1
+
+ip link set up dev br-ex
+ip addr add 10.10.0.1/32 broadcast 10.10.0.1 dev br-ex
+
+ip route add 10.10.0.0/24 dev br-ex
+
+ip rule add from all iif br-ex table 120
+ip route add 0.0.0.0/0 table 120 via 10.0.0.1 dev ens3
+
+

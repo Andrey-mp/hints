@@ -1,0 +1,16 @@
+token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) ; curl "https://10.96.0.1:443/api/v1/endpoints?limit=500&resourceVersion=0" --header "Authorization: Bearer $token" --insecure
+
+token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) ; wget -O - --header  "Authorization: Bearer $token" "https://10.96.0.1:443/api/v1/endpoints?limit=500&resourceVersion=0"
+
+cat /var/run/secrets/kubernetes.io/serviceaccount/token
+
+wget -O - http://127.0.0.1:8080/health
+dig +time=2 +tries=1 att.com @127.0.0.1
+dig +time=2 +tries=1 kubernetes.default.svc.cluster.local @127.0.0.1
+
+wget -O - "https://10.96.0.1:443/api/v1/services?limit=500&resourceVersion=0"
+wget -O - https://10.96.0.1:443/
+
+
+kubectl -n kube-system patch deployment coredns --type json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/readinessProbe"}]'
+kubectl -n kube-system patch deployment coredns --type json -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/livenessProbe"}]'

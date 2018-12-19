@@ -1,0 +1,87 @@
+config_api_image=`docker ps | awk '/config-api/{print $1}' | head`
+docker exec -it $config_api_image /bin/bash -c "LOG_LEVEL=SYS_NOTICE source /common.sh ; python /opt/contrail/utils/provision_control.py --host_name jc-cont-1 --host_ip 10.0.10.20 --api_server_ip $(hostname -i) --api_server_port 8082 --oper add --router_asn 64512 --ibgp_auto_mesh \$AUTH_PARAMS"
+
+ssh root@10.0.10.20 docker exec -t contrail-controller python /opt/contrail/utils/provision_control.py --host_name $(hostname) --host_ip $(hostname -i) --api_server_ip 10.0.10.20 --api_server_port 8082 --oper add --admin_user admin --admin_password password --admin_tenant_name admin --router_asn 64512 --ibgp_auto_mesh
+
+docker ps | grep config-devicemgr | awk '{print $1}' | xargs docker pause
+docker ps | grep config-schema | awk '{print $1}' | xargs docker pause
+docker ps | grep config-svcmonitor | awk '{print $1}' | xargs docker pause
+
+cat > contrail-issu.conf
+[DEFAULTS]
+# details about oldrabbit
+old_rabbit_user = contrail
+old_rabbit_password = a4fea4cdc4fd44cb9de42955cd009415
+old_rabbit_q_name = vnc-config.issu-queue
+old_rabbit_vhost = contrail
+old_rabbit_port = 5672
+old_rabbit_address_list = 10.0.10.20
+# details about new rabbit
+# new_rabbit_user = rabbitmq
+# new_rabbit_password = password
+# new_rabbit_ha_mode =
+new_rabbit_q_name = vnc-config.issu-queue
+new_rabbit_vhost = /
+new_rabbit_port = 5673
+new_rabbit_address_list = rabbitmq.contrail
+# details about other old/new services
+old_cassandra_user = controller
+old_cassandra_password = 7ac182f527604c5ba81493793e0538c5
+old_cassandra_address_list = 10.0.10.20:9161
+old_zookeeper_address_list = 10.0.10.20:2181
+new_cassandra_address_list = 10.40.43.116:9161
+new_zookeeper_address_list = 10.40.43.116:2181
+# details about new controller nodes
+new_api_info = {"10.40.43.116": [("root"), ("password")]}
+
+image_id=`docker images | awk '/config-api/{print $3}'`
+docker run --rm -it --network host -v $(pwd)/contrail-issu.conf:/etc/contrail/contrail-issu.conf --entrypoint /bin/bash -v /root/.ssh:/root/.ssh $image_id -c "/usr/bin/contrail-issu-pre-sync -c /etc/contrail/contrail-issu.conf"
+docker run --rm --detach -it --network host -v $(pwd)/contrail-issu.conf:/etc/contrail/contrail-issu.conf --entrypoint /bin/bash -v /root/.ssh:/root/.ssh --name issu-run-sync $image_id -c "/usr/bin/contrail-issu-run-sync -c /etc/contrail/contrail-issu.conf"
+
+docker exec -it issu-run-sync /bin/bash
+cat /var/log/contrail/issu_contrail_run_sync.log
+exit
+
+
+ssh root@10.0.10.30
+# stop services
+systemctl stop contrail-vrouter-nodemgr
+systemctl stop contrail-vrouter-agent
+# remove packages
+apt-get purge -y contrail*
+# restore original interfaces definition
+cd /etc/network/interfaces.d/
+cp 50-cloud-init.cfg.save 50-cloud-init.cfg
+rm vrouter.cfg
+# restart networking
+systemctl restart networking.service
+# remove old kernel module
+rmmod vrouter
+
+git clone https://github.com/Juniper/openstack-helm-infra.git /opt/openstack-helm-infra
+git clone https://github.com/Juniper/contrail-helm-deployer.git /opt/contrail-helm-deployer
+
+
+
+vi /opt/openstack-helm-infra/tools/gate/devel/multinode-inventory.yaml
+
+export BASE_DIR=/opt
+export OSH_INFRA_PATH=${BASE_DIR}/openstack-helm-infra
+export CHD_PATH=${BASE_DIR}/contrail-helm-deployer
+cd ${OSH_INFRA_PATH}
+make dev-deploy setup-host multinode
+make dev-deploy k8s multinode
+
+
+kubectl get nodes
+kubectl label node jc4-comp-1 --overwrite openstack-control-plane=disable
+kubectl label node jc4-comp-1 opencontrail.org/vrouter-kernel=enabled
+
+kubectl get nodes
+kubectl label node jc4-comp-2 --overwrite openstack-control-plane=disable
+kubectl label node jc4-comp-2 opencontrail.org/vrouter-kernel=enabled
+
+vi /tmp/contrail.yaml
+
+helm install --name contrail-vrouter ${CHD_PATH}/contrail-vrouter --namespace=contrail --values=/tmp/contrail.yaml
+

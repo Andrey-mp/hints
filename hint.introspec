@@ -1,0 +1,1 @@
+curl http://192.168.130.66:5995/Snh_SandeshUVECacheReq?x=NodeStatus | xmllint --format -
