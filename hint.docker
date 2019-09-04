@@ -6,3 +6,9 @@ for name in `docker images|grep contrail|awk '{print $1}'|cut -d '/' -f 2`; do \
   docker save $id | gzip -c > "$name-$tag.tgz" ; \
 done
 
+
+
+# cat >.docker/config.json
+{"experimental": "enabled"}
+
+# docker manifest inspect opencontrailnightly/developer-sandbox:latest
